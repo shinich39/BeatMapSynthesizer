@@ -21,6 +21,9 @@ import scipy
 import sys
 import argparse
 import shutil
+from pathlib import Path
+
+OUTPUT_PATH = os.path.join(os.getcwd(), "output")
 
 #Main Function:
 def beat_map_synthesizer(song_path, song_name, difficulty, model, k=5, version = 2):
@@ -30,9 +33,7 @@ def beat_map_synthesizer(song_path, song_name, difficulty, model, k=5, version =
     ***
     song_path = string file path to music file location
     
-    song_name = string to name level as it will appear in the game
-    
-    difficulty = desired difficulty level, can be: 'easy', 'normal', 'hard', 'expert', or 'expertPlus'
+    difficulty = desired difficulty level, can be: 'all', 'easy', 'normal', 'hard', 'expert', or 'expertPlus'
     
     model = desired model to use for map generation, can be: 'random', 'HMM', 'segmented_HMM', or 'rate_modulated_segmented_HMM'
     
@@ -41,72 +42,108 @@ def beat_map_synthesizer(song_path, song_name, difficulty, model, k=5, version =
     version = for HMM models, can choose either 1 or 2. 1 was trained on a smaller, but potentially higher quality dataset (custom maps with over 90% rating on beatsaver.com), while 2 was trained on a larger dataset of custom maps with over 70% rating, so it may have a larger pool of "potential moves."
     ***
     """
+    # create output directory
+    if not os.path.exists(OUTPUT_PATH):
+        os.mkdir(OUTPUT_PATH)
+
+    difficulties = None
+    if difficulty.casefold() == 'all'.casefold():
+        difficulties = ['easy', 'normal', 'hard', 'expert', 'expertPlus']
+    elif difficulty.casefold() in ['easy', 'normal', 'hard', 'expert', 'expertPlus']:
+        difficulties = [difficulty.casefold()]
+    else:
+        print('Please specify difficulty for mapping.')
+        return
+
     if model == 'random':
-        random_mapper(song_path, song_name, difficulty)
+        random_mapper(song_path, song_name, difficulties)
     elif model == 'HMM':
-        HMM_mapper(song_path, song_name, difficulty, version = version)
+        HMM_mapper(song_path, song_name, difficulties, version = version)
     elif model == 'segmented_HMM':
-        segmented_HMM_mapper(song_path, song_name, difficulty, k = k, version = version)
+        segmented_HMM_mapper(song_path, song_name, difficulties, k = k, version = version)
     elif model == 'rate_modulated_segmented_HMM':
-        rate_modulated_segmented_HMM_mapper(song_path, song_name, difficulty, version = version, k = k)
+        rate_modulated_segmented_HMM_mapper(song_path, song_name, difficulties, version = version, k = k)
     else:
         print('Please specify model for mapping.')
 
+def create_info(song_name, bpm):
+    info = {
+        '_version': '2.0.0',
+        '_songName': f"{song_name}",
+        '_songSubName': '',
+        '_songAuthorName': '',
+        '_levelAuthorName': 'BeatMapSynth',
+        '_beatsPerMinute': round(bpm),
+        '_songTimeOffset': 0,
+        '_shuffle': 0,
+        '_shufflePeriod': 0,
+        '_previewStartTime': 10,
+        '_previewDuration': 30,
+        '_songFilename': 'song.egg',
+        '_coverImageFilename': 'cover.jpg',
+        '_environmentName': 'DefaultEnvironment',
+        # "_allDirectionsEnvironmentName": "GlassDesertEnvironment",
+        '_customData': {},
+        '_difficultyBeatmapSets': [{}]
+    }
+
+    return info
+
 #Basic File Writing Functions
-def write_info(song_name, bpm, difficulty):
+def update_info(info, difficulty):
     """This function creates the 'info.dat' file that needs to be included in the custom folder."""
 
     difficulty_rank = None
     jump_movement = None
+    filename = None
     if difficulty.casefold() == 'easy'.casefold():
         difficulty_rank = 1
         jump_movement = 8
         diff_name = 'Easy'
+        filename = 'EasyStandard.dat'
     elif difficulty.casefold() == 'normal'.casefold():
         difficulty_rank = 3
         jump_movement = 10
         diff_name = 'Normal'
+        filename = 'NormalStandard.dat'
     elif difficulty.casefold() == 'hard'.casefold():
         difficulty_rank = 5
         jump_movement = 12
         diff_name = 'Hard'
+        filename = 'HardStandard.dat'
     elif difficulty.casefold() == 'expert'.casefold():
         difficulty_rank = 7
         jump_movement = 14
         diff_name = 'Expert'
+        filename = 'ExpertStandard.dat'
     elif difficulty.casefold() == 'expertPlus'.casefold():
         difficulty_rank = 9
         jump_movement = 16
         diff_name = 'ExpertPlus'
-            
-    info = {'_version': '2.0.0',
-            '_songName': f"{song_name}",
-            '_songSubName': '',
-            '_songAuthorName': '',
-            '_levelAuthorName': 'BeatMapSynth',
-            '_beatsPerMinute': round(bpm),
-            '_songTimeOffset': 0,
-            '_shuffle': 0,
-            '_shufflePeriod': 0,
-            '_previewStartTime': 10,
-            '_previewDuration': 30,
-            '_songFilename': 'song.egg',
-            '_coverImageFilename': 'cover.jpg',
-            '_environmentName': 'DefaultEnvironment',
+        filename = 'ExpertPlusStandard.dat'
+
+    info['_difficultyBeatmapSets'].append({
+        '_beatmapCharacteristicName': 'Standard',
+        '_difficultyBeatmaps': [{
+            '_difficulty': diff_name,
+            '_difficultyRank': difficulty_rank,
+            '_beatmapFilename': filename,
+            '_noteJumpMovementSpeed': jump_movement,
+            '_noteJumpStartBeatOffset': 0,
             '_customData': {},
-             '_difficultyBeatmapSets': [{'_beatmapCharacteristicName': 'Standard',
-                                         '_difficultyBeatmaps': [{'_difficulty': diff_name,
-                                                                  '_difficultyRank': difficulty_rank,
-                                                                  '_beatmapFilename': f"{difficulty}.dat",
-                                                                  '_noteJumpMovementSpeed': jump_movement,
-                                                                  '_noteJumpStartBeatOffset': 0,
-                                                                  '_customData': {}}]}]}
-    with open('info.dat', 'w') as f:
-        json.dump(info, f)
+
+            # v3
+            # "_beatmapColorSchemeIdx": 0,
+            # "_environmentNameIdx": 0,
+        }]
+    })
+
+def write_info(info):
+    with open(f'{OUTPUT_PATH}/info.dat', 'w') as f:
+        json.dump(info, f, indent = 2)
 
 def write_level(difficulty, events_list, notes_list, obstacles_list):
     """This function creates the 'level.dat' file that contains all the data for that paticular difficulty level"""
-    
     level = {'_version': '2.0.0',
              '_customData': {'_time': '', #not sure what time refers to 
                              '_BPMChanges': [], 
@@ -114,47 +151,148 @@ def write_level(difficulty, events_list, notes_list, obstacles_list):
              '_events': events_list,
              '_notes': notes_list,
              '_obstacles': obstacles_list}
-    with open(f"{difficulty}.dat", 'w') as f:
+    
+    filename = None
+    if difficulty.casefold() == 'easy'.casefold():
+        filename = 'EasyStandard.dat'
+    elif difficulty.casefold() == 'normal'.casefold():
+        filename = 'NormalStandard.dat'
+    elif difficulty.casefold() == 'hard'.casefold():
+        filename = 'HardStandard.dat'
+    elif difficulty.casefold() == 'expert'.casefold():
+        filename = 'ExpertStandard.dat'
+    elif difficulty.casefold() == 'expertPlus'.casefold():
+        filename = 'ExpertPlusStandard.dat'
+    
+    with open(f'{OUTPUT_PATH}/{filename}', 'w') as f:
+        json.dump(level, f)
+
+def write_level_v3(difficulty, bpm_events_list, rotation_events_list, notes_list, bombs_lists, obstacles_list, sliders_lists, burst_sliders_lists):
+    """This function creates the 'level.dat' file that contains all the data for that paticular difficulty level"""
+
+    level = {
+        'version': '3.0.0',
+        # 'customData': {},
+        'bpmEvents': bpm_events_list,
+        'rotationEvents': rotation_events_list,
+        'colorNotes': notes_list,
+        'bombNotes': bombs_lists,
+        'obstacles': obstacles_list,
+        'sliders': sliders_lists,
+        'burstSliders': burst_sliders_lists,
+        'basicBeatmapEvents': [],
+        'colorBoostBeatmapEvents': [],
+        'waypoints': [],
+        'basicEventTypesWithKeywords': [{'b': []}],
+        'lightColorEventBoxGroups': [],
+        'lightRotationEventBoxGroups': [],
+        'useNormalEventsAsCompatibleEvents': False,
+    }
+    
+    filename = None
+    if difficulty.casefold() == 'easy'.casefold():
+        filename = 'EasyStandard.dat'
+    elif difficulty.casefold() == 'normal'.casefold():
+        filename = 'NormalStandard.dat'
+    elif difficulty.casefold() == 'hard'.casefold():
+        filename = 'HardStandard.dat'
+    elif difficulty.casefold() == 'expert'.casefold():
+        filename = 'ExpertStandard.dat'
+    elif difficulty.casefold() == 'expertPlus'.casefold():
+        filename = 'ExpertPlusStandard.dat'
+    
+    with open(f'{OUTPUT_PATH}/{filename}', 'w') as f:
         json.dump(level, f)
 
 def music_file_converter(song_path):
     """This function makes sure the file type of the provided song will be converted to the music file type that 
     Beat Saber accepts"""
     if song_path.endswith('.mp3'):
-        AudioSegment.from_mp3(song_path).export('song.egg', format='ogg')
+        AudioSegment.from_mp3(song_path).export(f'{OUTPUT_PATH}/song.egg', format='ogg')
     elif song_path.endswith('.wav'):
-        AudioSegment.from_wav(song_path).export('song.egg', format='ogg')
+        AudioSegment.from_wav(song_path).export(f'{OUTPUT_PATH}/song.egg', format='ogg')
     elif song_path.endswith('.flv'):
-        AudioSegment.from_flv(song_path).export('song.egg', format='ogg')
+        AudioSegment.from_flv(song_path).export(f'{OUTPUT_PATH}/song.egg', format='ogg')
     elif song_path.endswith('.raw'):
-        AudioSegment.from_raw(song_path).export('song.egg', format='ogg')
+        AudioSegment.from_raw(song_path).export(f'{OUTPUT_PATH}/song.egg', format='ogg')
     elif song_path.endswith('.ogg') or song_path.endswith('.egg'):
-        shutil.copy2(song_path, 'song.egg')
+        shutil.copy2(song_path, f'{OUTPUT_PATH}/song.egg')
     else:
         print("Unsupported song file type. Choose a file of type .mp3, .wav, .flv, .raw, or .ogg.")
 
+# v2
 def events_writer(beat_times):
     """Placeholder function for writing a list of events to be incorporated into a beatmap file. May have future support."""
     events_list = []
     return events_list
+
+# v3
+def rotation_events_writer(beat_times):
+    """Placeholder function for writing a list of rotation events to be incorporated into a beatmap file. May have future support."""
+    rotation_events = []
+    return rotation_events
+
+# v3
+def bpm_events_writer(beat_times, bpm):
+    """Placeholder function for writing a list of bpm events to be incorporated into a beatmap file. May have future support."""
+    bpm_events = [
+        {
+            "b": 0,
+            "m": round(bpm),
+        }
+    ]
+    return bpm_events
 
 def obstacles_writer(beat_times, difficulty):
     """Placeholder function for writing a list of obstacles to be incorporated into a beatmap file."""
     obstacles_list = []
     return obstacles_list
 
-def zip_folder_exporter(song_name, difficulty):
+def bombs_writer(beat_times, difficulty):
+    """Placeholder function for writing a list of bombs to be incorporated into a beatmap file."""
+    bombs_list = []
+    return bombs_list
+
+def sliders_writer(beat_times, difficulty):
+    """Placeholder function for writing a list of sliders to be incorporated into a beatmap file."""
+    sliders_list = []
+    return sliders_list
+
+def burst_sliders_writer(beat_times, difficulty):
+    """Placeholder function for writing a list of burst sliders to be incorporated into a beatmap file."""
+    burst_sliders_list = []
+    return burst_sliders_list
+
+def zip_folder_exporter(song_path, song_name, difficulties):
     "This function exports the zip folder containing the info.dat, difficulty.dat, cover.jpg, and song.egg files."
-    files = ['info.dat', f"{difficulty}.dat", 'cover.jpg', 'song.egg']
-    with ZipFile(f"{song_name}.zip", 'w') as custom:
+    files = ['info.dat', 'song.egg']
+
+    for difficulty in difficulties:
+        if difficulty.casefold() == 'easy'.casefold():
+            files.append('EasyStandard.dat')
+        elif difficulty.casefold() == 'normal'.casefold():
+            files.append('NormalStandard.dat')
+        elif difficulty.casefold() == 'hard'.casefold():
+            files.append('HardStandard.dat')
+        elif difficulty.casefold() == 'expert'.casefold():
+            files.append('ExpertStandard.dat')
+        elif difficulty.casefold() == 'expertPlus'.casefold():
+            files.append('ExpertPlusStandard.dat')
+
+    zip_path = os.path.join(os.path.dirname(song_path), f"{song_name}.zip")
+    with ZipFile(zip_path, 'w') as custom:
         for file in files:
-            custom.write(file)
+            custom.write(f'{OUTPUT_PATH}/{file}', file)
+
+        # write cover
+        custom.write("cover.jpg")
+
+    # remove files
     for file in files:
-        if file != 'cover.jpg':
-            os.remove(file)
+        os.remove(f'{OUTPUT_PATH}/{file}')
 
 #Random Mapping Functions
-def random_mapper(song_path, song_name, difficulty):
+def random_mapper(song_path, song_name, difficulties):
     """Function to output the automatically created completely random map (i.e. baseline model) for a provided song. Returns a zipped folder that can be unzipped and placed in the 'CustomMusic' folder in the Beat Saber game directory and played. CAUTION: This is completely random and is likely not enjoyable if even playable!"""
     #Load song and get beat features
     print("Loading Song...")
@@ -162,19 +300,28 @@ def random_mapper(song_path, song_name, difficulty):
     print("Song loaded successfully!")
     #Write lists for note placement, event placement, and obstacle placement
     print("Random mapping...")
-    #notes_list = random_notes_writer(beat_times, difficulty) 
-    notes_list = random_notes_writer_v2(beat_times, difficulty, bpm) #fixes _time != beat time
-    events_list = events_writer(beat_times)
-    obstacles_list = obstacles_writer(beat_times, difficulty)
-    print("Mapping done!")
-    #Write and zip files
-    print("Writing files to disk...")
-    write_info(song_name, bpm, difficulty)
-    write_level(difficulty, events_list, notes_list, obstacles_list)
+
+    info = create_info(song_name, bpm)
+    for difficulty in difficulties:
+        notes_list = random_notes_writer_v3(beat_times, difficulty, bpm) #fixes _time != beat time
+        rotation_events_list = rotation_events_writer(beat_times)
+        bpm_events_list = bpm_events_writer(beat_times, bpm)
+        bombs_list = bombs_writer(beat_times, difficulty)
+        sliders_list = sliders_writer(beat_times, difficulty)
+        burst_sliders_list = burst_sliders_writer(beat_times, difficulty)
+        obstacles_list = obstacles_writer(beat_times, difficulty)
+        print(f"{difficulty.capitalize()} mapping done!")
+        #Write and zip files
+        print(f"{difficulty.capitalize()} writing files to disk...")
+        update_info(info, difficulty)
+        write_level_v3(difficulty, bpm_events_list, rotation_events_list, notes_list, bombs_list, obstacles_list, sliders_list, burst_sliders_list)
+
+    print("Writing info to disk...")
+    write_info(info)
     print("Converting music file...")
     music_file_converter(song_path)
     print("Zipping folder...")
-    zip_folder_exporter(song_name, difficulty)
+    zip_folder_exporter(song_path, song_name, difficulties)
     print("Finished! Look for zipped folder in your current path, unzip the folder, and place in the 'CustomMusic' folder in the Beat Saber directory")
 
 def beat_features(song_path):
@@ -185,7 +332,9 @@ def beat_features(song_path):
     #Isolate beats and beat times
     bpm, beat_frames = librosa.beat.beat_track(y=y, sr=sr, trim = False)
     beat_times = librosa.frames_to_time(beat_frames, sr=sr)
-    return bpm, beat_times, y, sr
+    # return bpm, beat_times, y, sr
+    return bpm.item() if isinstance(bpm, np.ndarray) else bpm, beat_times, y, sr
+
 
 def random_notes_writer_v2(beat_times, difficulty, bpm):
     """This function randomly places blocks at approximately each beat or every other beat depending on the difficulty."""
@@ -230,8 +379,59 @@ def random_notes_writer_v2(beat_times, difficulty, bpm):
 
     return notes_list
 
+# https://bsmg.wiki/mapping/map-format/beatmap.html
+def random_notes_writer_v3(beat_times, difficulty, bpm):
+    """This function randomly places blocks at approximately each beat or every other beat depending on the difficulty."""
+    notes_list = [] # colorNotes
+    line_index = [0, 1, 2, 3]
+    line_layer = [0, 1, 2]
+    types = [0, 1] # left, right
+    directions = list(range(0, 8)) # up, down, left, right, up left, up right, down left, down right, any
+    angle_offsets = [0]
+    #beat_times = [float(x) for x in beat_times]
+    beat_times = [x*(bpm/60) for x in beat_times] #list(range(len(beat_times)))
+
+    if difficulty == 'Easy' or difficulty == 'Normal':
+        for beat in beat_times:
+            empty = np.random.choice([0,1])
+            if empty == 1:
+                note = {
+                    'b': beat,
+                    'x': int(np.random.choice(line_index)),
+                    'y': int(np.random.choice(line_layer)),
+                    'c': int(np.random.choice(types)),
+                    'd': int(np.random.choice(directions)),
+                    'a': int(np.random.choice(angle_offsets)),
+                }
+                notes_list.append(note)
+            else:
+                continue
+    else:
+        random_beats = np.random.choice(beat_times, np.random.choice(range(len(beat_times)))) #randomly choose beats to have more than one note placed
+        randomly_duplicated_beat_times = np.concatenate([beat_times, random_beats])
+        randomly_duplicated_beat_times.sort()
+        randomly_duplicated_beat_times = [float(x) for x in randomly_duplicated_beat_times]
+        for beat in randomly_duplicated_beat_times:
+            note = {
+                'b': beat,
+                'x': int(np.random.choice(line_index)),
+                'y': int(np.random.choice(line_layer)),
+                'c': int(np.random.choice(types)),
+                'd': int(np.random.choice(directions)),
+                'a': int(np.random.choice(angle_offsets)),
+            }
+            notes_list.append(note)
+    #Remove potential notes that come too early in the song:
+    for i, x in enumerate(notes_list):
+        if notes_list[i]['b'] >= 0 and notes_list[i]['b'] <= 1.5:
+            del notes_list[i]
+        elif notes_list[i]['b'] > beat_times[-1]:
+            del notes_list[i]
+
+    return notes_list
+
 #Hidden Markov Models Mapping Functions
-def HMM_mapper(song_path, song_name, difficulty, version = 2):
+def HMM_mapper(song_path, song_name, difficulties, version = 2):
     """This function generates a custom map based on a Hidden Markov Model."""
     #Load song and get beat features
     print("Loading Song...")
@@ -240,18 +440,28 @@ def HMM_mapper(song_path, song_name, difficulty, version = 2):
     print("Song loaded successfully!")
     #Write lists for note placement, event placement, and obstacle placement
     print("Mapping with Hidden Markov Model...")
-    notes_list = HMM_notes_writer(beat_times, difficulty, version)
-    events_list = events_writer(beat_times)
-    obstacles_list = obstacles_writer(beat_times, difficulty)
-    print("Mapping done!")
-    #Write and zip files
-    print("Writing files to disk...")
-    write_info(song_name, bpm, difficulty)
-    write_level(difficulty, events_list, notes_list, obstacles_list)
+
+    info = create_info(song_name, bpm)
+    for difficulty in difficulties:
+        notes_list = HMM_notes_writer_v3(beat_times, difficulty, version)
+        rotation_events_list = rotation_events_writer(beat_times)
+        bpm_events_list = bpm_events_writer(beat_times, bpm)
+        bombs_list = bombs_writer(beat_times, difficulty)
+        sliders_list = sliders_writer(beat_times, difficulty)
+        burst_sliders_list = burst_sliders_writer(beat_times, difficulty)
+        obstacles_list = obstacles_writer(beat_times, difficulty)
+        print(f"{difficulty.capitalize()} mapping done!")
+        #Write and zip files
+        print(f"{difficulty.capitalize()} writing files to disk...")
+        update_info(info, difficulty)
+        write_level_v3(difficulty, bpm_events_list, rotation_events_list, notes_list, bombs_list, obstacles_list, sliders_list, burst_sliders_list)
+    
+    print("Writing info to disk...")
+    write_info(info)
     print("Converting music file...")
     music_file_converter(song_path)
     print("Zipping folder...")
-    zip_folder_exporter(song_name, difficulty)
+    zip_folder_exporter(song_path, song_name, difficulties)
     print("Finished! Look for zipped folder in your current path, unzip the folder, and place in the 'CustomMusic' folder in the Beat Saber directory")
 
 def walk_to_df(walk):
@@ -317,9 +527,66 @@ def HMM_notes_writer(beat_list, difficulty, version):
 
     return notes_list
 
+
+# https://bsmg.wiki/mapping/map-format/beatmap.html#color-notes-beat
+def HMM_notes_writer_v3(beat_list, difficulty, version):
+    """Writes a list of notes based on a Hidden Markov Model walk."""
+    #Load model
+    if version == 1:
+        with open(f"./models/HMM_{difficulty}.pkl", 'rb') as m:
+            MC = pickle.load(m)
+    elif version == 2:
+        with open(f"./models/HMM_{difficulty}_v2.pkl", 'rb') as m:
+            MC = pickle.load(m)
+    #Set note placement rate dependent on difficulty level
+    counter = 2
+    beats = []
+    rate = None
+    angle_offsets = [0]
+    if difficulty == 'easy':
+        rate = 3
+    elif difficulty == 'normal':
+        rate = 2
+    else:
+        rate = 1
+    while counter <= len(beat_list):
+        beats.append(counter)
+        counter += rate
+    #Get HMM walk long enough to cover number of beats
+    random_walk = MC.walk()
+    while len(random_walk) < len(beats):
+        random_walk = MC.walk()
+    df_walk = walk_to_df(random_walk)
+    #Combine beat numbers with HMM walk steps
+    df_preds = pd.concat([pd.DataFrame(beats, columns = ['_time']), df_walk], axis = 1, sort = True)
+    df_preds.dropna(axis = 0, inplace = True)
+    #Write notes dictionaries
+    notes_list = []
+    for index, row in df_preds.iterrows():
+        for x in list(filter(lambda y: y.startswith('notes_type'), df_preds.columns)):
+            if row[x] != '999':
+                num = x[-1]
+                note = {
+                    'b': row['_time'],
+                    'x': int(row[f"notes_lineIndex_{num}"]),
+                    'y': int(row[f"notes_lineLayer_{num}"]),
+                    'c': num,
+                    'd': int(row[f"notes_cutDirection_{num}"]),
+                    'a': int(np.random.choice(angle_offsets)),
+                }
+                notes_list.append(note)
+   #Remove potential notes that come too early in the song:
+    for i, x in enumerate(notes_list):
+        if notes_list[i]['b'] >= 0 and notes_list[i]['b'] <= 1.5:
+            del notes_list[i]
+        elif notes_list[i]['b'] > beats[-1]:
+            del notes_list[i]
+
+    return notes_list
+
 #Segmented HMM Functions
 
-def segmented_HMM_mapper(song_path, song_name, difficulty, k = 5, version = 2):
+def segmented_HMM_mapper(song_path, song_name, difficulties, k = 5, version = 2):
     """This function generates a custom map based on a HMM model that operates on song segments. First, Laplacian song segmentation is performed to identify similar portions of songs. Then, a HMM is used to generate a block sequence through the first of each of these identified song segments. If that segment is repeated later in the song, the block sequence will be repeated."""
     #Load song and get beat features
     print("Loading Song...")
@@ -328,18 +595,28 @@ def segmented_HMM_mapper(song_path, song_name, difficulty, k = 5, version = 2):
     print("Song loaded successfully!")
     #Write lists for note placement, event placement, and obstacle placement
     print("Mapping with segmented Hidden Markov Model...")
-    notes_list = segmented_HMM_notes_writer(y, sr, k, difficulty, version)
-    events_list = events_writer(beat_times)
-    obstacles_list = obstacles_writer(beat_times, difficulty)
-    print("Mapping done!")
-    #Write and zip files
-    print("Writing files to disk...")
-    write_info(song_name, bpm, difficulty)
-    write_level(difficulty, events_list, notes_list, obstacles_list)
+
+    info = create_info(song_name, bpm)
+    for difficulty in difficulties:
+        notes_list = segmented_HMM_notes_writer_v3(y, sr, k, difficulty, version)
+        rotation_events_list = rotation_events_writer(beat_times)
+        bpm_events_list = bpm_events_writer(beat_times, bpm)
+        bombs_list = bombs_writer(beat_times, difficulty)
+        sliders_list = sliders_writer(beat_times, difficulty)
+        burst_sliders_list = burst_sliders_writer(beat_times, difficulty)
+        obstacles_list = obstacles_writer(beat_times, difficulty)
+        print(f"{difficulty.capitalize()} mapping done!")
+        #Write and zip files
+        print(f"{difficulty.capitalize()} writing files to disk...")
+        update_info(info, difficulty)
+        write_level_v3(difficulty, bpm_events_list, rotation_events_list, notes_list, bombs_list, obstacles_list, sliders_list, burst_sliders_list)
+    
+    print("Writing info to disk...")
+    write_info(info)
     print("Converting music file...")
     music_file_converter(song_path)
     print("Zipping folder...")
-    zip_folder_exporter(song_name, difficulty)
+    zip_folder_exporter(song_path, song_name, difficulties)
     print("Finished! Look for zipped folder in your current path, unzip the folder, and place in the 'CustomMusic' folder in the Beat Saber directory")
 
 def laplacian_segmentation(y, sr, k = 5):
@@ -507,8 +784,51 @@ def segmented_HMM_notes_writer(y, sr, k, difficulty, version = 2):
     
     return notes_list
 
+# https://bsmg.wiki/mapping/map-format/beatmap.html#color-notes-beat
+def segmented_HMM_notes_writer_v3(y, sr, k, difficulty, version = 2):
+    """This function writes the list of notes based on the segmented HMM model."""
+    #Load model:
+    if version == 1:
+        with open(f"./models/HMM_{difficulty}.pkl", 'rb') as m:
+            MC = pickle.load(m)
+    elif version == 2:
+        with open(f"./models/HMM_{difficulty}_v2.pkl", 'rb') as m:
+            MC = pickle.load(m)
+            
+    angle_offsets = [0]
+    segments, beat_times, tempo = laplacian_segmentation(y, sr, k)
+    segments_df = segments_to_df(segments)
+    preds = segment_predictions(segments_df, MC)
+    #Combine beat numbers with HMM walk steps
+    beats = [(x/60)* tempo for x in beat_times]
+    df_preds = pd.concat([pd.DataFrame(beats, columns = ['_time']), preds], axis = 1, sort = True)
+    df_preds.dropna(axis = 0, inplace = True)
+    #Write notes dictionaries
+    notes_list = []
+    for index, row in df_preds.iterrows():
+        for x in list(filter(lambda y: y.startswith('notes_type'), df_preds.columns)):
+            if row[x] != '999':
+                num = x[-1]
+                note = {
+                    'b': row['_time'],
+                    'x': int(row[f"notes_lineIndex_{num}"]),
+                    'y': int(row[f"notes_lineLayer_{num}"]),
+                    'c': num,
+                    'd': int(row[f"notes_cutDirection_{num}"]),
+                    'a': int(np.random.choice(angle_offsets)),
+                }
+                notes_list.append(note)
+    #Remove potential notes that come too early in the song:
+    for i, x in enumerate(notes_list):
+        if notes_list[i]['b'] >= 0 and notes_list[i]['b'] <= 1.5:
+            del notes_list[i]
+        elif notes_list[i]['b'] > beats[-1]:
+            del notes_list[i]
+    
+    return notes_list
+
 #Rate Modulated Segmented HMM mapping functions
-def rate_modulated_segmented_HMM_mapper(song_path, song_name, difficulty, version = 2, k = 5):
+def rate_modulated_segmented_HMM_mapper(song_path, song_name, difficulties, version = 2, k = 5):
     """This function generates the files for a custom map using a rate modulated segmented HMM model."""
     #Load song and get beat features
     print("Loading Song...")
@@ -516,18 +836,28 @@ def rate_modulated_segmented_HMM_mapper(song_path, song_name, difficulty, versio
     print("Song loaded successfully!")
     #Write lists for note placement, event placement, and obstacle placement
     print("Mapping with rate modulated segmented Hidden Markov Model...")
-    notes_list, modulated_beat_list = rate_modulated_segmented_HMM_notes_writer(y, sr, k, difficulty, version)
-    events_list = events_writer(modulated_beat_list)
-    obstacles_list = obstacles_writer(modulated_beat_list, difficulty)
-    print("Mapping done!")
-    #Write and zip files
-    print("Writing files to disk...")
-    write_info(song_name, bpm, difficulty)
-    write_level(difficulty, events_list, notes_list, obstacles_list)
+
+    info = create_info(song_name, bpm)
+    for difficulty in difficulties:
+        notes_list, modulated_beat_list = rate_modulated_segmented_HMM_notes_writer_v3(y, sr, k, difficulty, version)
+        rotation_events_list = rotation_events_writer(modulated_beat_list)
+        bpm_events_list = bpm_events_writer(modulated_beat_list, bpm)
+        bombs_list = bombs_writer(modulated_beat_list, difficulty)
+        sliders_list = sliders_writer(modulated_beat_list, difficulty)
+        burst_sliders_list = burst_sliders_writer(modulated_beat_list, difficulty)
+        obstacles_list = obstacles_writer(modulated_beat_list, difficulty)
+        print(f"{difficulty.capitalize()} mapping done!")
+        #Write and zip files
+        print(f"{difficulty.capitalize()} writing files to disk...")
+        update_info(info, difficulty)
+        write_level_v3(difficulty, bpm_events_list, rotation_events_list, notes_list, bombs_list, obstacles_list, sliders_list, burst_sliders_list)
+    
+    print("Writing info to disk...")
+    write_info(info)
     print("Converting music file...")
     music_file_converter(song_path)
     print("Zipping folder...")
-    zip_folder_exporter(song_name, difficulty)
+    zip_folder_exporter(song_path, song_name, difficulties)
     print("Finished! Look for zipped folder in your current path, unzip the folder, and place in the 'CustomMusic' folder in the Beat Saber directory")
 
 def choose_rate(db, difficulty):
@@ -723,16 +1053,74 @@ def rate_modulated_segmented_HMM_notes_writer(y, sr, k, difficulty, version):
 
     return notes_list, modulated_beat_list
 
+# https://bsmg.wiki/mapping/map-format/beatmap.html#color-notes-beat
+def rate_modulated_segmented_HMM_notes_writer_v3(y, sr, k, difficulty, version):
+    """Function to write the notes to a list after predicting with the rate modulated segmented HMM model."""
+    #Load model:
+    if version == 1:
+        with open(f"./models/HMM_{difficulty}.pkl", 'rb') as m:
+            MC = pickle.load(m)
+    elif version == 2:
+        with open(f"./models/HMM_{difficulty}_v2.pkl", 'rb') as m:
+            MC = pickle.load(m)
+    
+    angle_offsets = [0]
+    segments, beat_times, bpm = laplacian_segmentation(y, sr, k)
+    modulated_beat_list = amplitude_rate_modulation(y, sr, difficulty)
+    segments_df = segments_to_df_rate_modulated(segments, modulated_beat_list)
+    preds = segment_predictions(segments_df, MC)
+    #Combine beat numbers with HMM walk steps
+    beat_times = [(x/60)*bpm for x in beat_times]
+    beat_count = list(range(len(beat_times)))
+    beats = pd.concat([pd.Series(beat_times, name = '_time'), pd.Series(beat_count, name = 'beat_count')], axis = 1)
+    for index, value in beats.iterrows():
+        if value['beat_count'] not in modulated_beat_list:
+            beats.drop(index = index, inplace=True)
+    merged_beats = pd.merge(left = beats, right = pd.Series(modulated_beat_list, name = 'beat_count'), how='outer', on='beat_count', sort = True)
+    merged_beats.interpolate(inplace=True)
+    merged_beats.drop(columns = 'beat_count', inplace = True)
+    
+    df_preds = pd.concat([merged_beats, preds], axis = 1, sort = True)
+    df_preds.dropna(axis = 0, inplace = True)
+    #Write notes dictionaries
+    notes_list = []
+    for index, row in df_preds.iterrows():
+        for x in list(filter(lambda y: y.startswith('notes_type'), df_preds.columns)):
+            if row[x] != '999':
+                num = x[-1]
+                note = {
+                    'b': row['_time'],
+                    'x': int(row[f"notes_lineIndex_{num}"]),
+                    'y': int(row[f"notes_lineLayer_{num}"]),
+                    'c': num,
+                    'd': int(row[f"notes_cutDirection_{num}"]),
+                    'a': int(np.random.choice(angle_offsets)),
+                }
+                notes_list.append(note)
+    #Remove potential notes that come too early in the song:
+    for i, x in enumerate(notes_list):
+        if notes_list[i]['b'] >= 0 and notes_list[i]['b'] <= 1.5:
+            del notes_list[i]
+        elif notes_list[i]['b'] > beat_times[-1]:
+            del notes_list[i]
+
+    return notes_list, modulated_beat_list
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('song_path', metavar='path', type=str, help='File Path to song file')
-    parser.add_argument('song_name', type=str, help='Name of song to be displayed in Beat Saber')
+    parser.add_argument('dir_path', metavar='path', type=str, help='Direcotory path')
+    # parser.add_argument('song_path', metavar='path', type=str, help='File Path to song file')
+    # parser.add_argument('song_name', type=str, help='Name of song to be displayed in Beat Saber')
     parser.add_argument('difficulty', type=str, help="Desired difficulty level: 'easy', 'normal', 'hard', 'expert', or 'expertPlus'")
     parser.add_argument('model', type=str, help="Desired model for mapping: 'random', 'HMM', 'segmented_HMM', 'rate_modulated_segmented_HMM'")
     parser.add_argument('-k', type=int, help="Number of expected segments for segmented model. Default 5", default=5, required=False)
     parser.add_argument('--version', type=int, help="Version of HMM model to use: 1 (90% rating or greater) or 2 (70% rating or greater)", default=2, required=False)
 
     args = parser.parse_args()
-    
-    beat_map_synthesizer(args.song_path, args.song_name, args.difficulty, args.model, args.k, args.version)
-    
+
+    exts = [".mp3", ".wav", ".flv", ".raw", ".ogg", ".egg"]
+    for file in os.listdir(args.dir_path):
+        if any(file.endswith(ext) for ext in exts):
+            song_path = os.path.join(args.dir_path, file)
+            song_name = Path(song_path).stem
+            beat_map_synthesizer(song_path, song_name, args.difficulty, args.model, args.k, args.version)
